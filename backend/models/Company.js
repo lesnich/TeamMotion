@@ -8,7 +8,6 @@ const departmentSchema = new mongoose.Schema({
 const companySchema = new mongoose.Schema({
     name: { type: String, required: true },
     departments: [departmentSchema],
-    users: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true })
 

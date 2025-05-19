@@ -1,19 +1,18 @@
-const router = require('express').Router()
-const Activity = require('../models/Activity')
-const requireAuth = require('../middleware/requireAuth')
+const router = require('express').Router();
+const activityController = require('../controllers/activity');
+const requireAuth = require('../middleware/requireAuth');
+const requireRoles = require('../middleware/requireRoles');
+const ROLES_LIST = require('../config/rolesList');
 
-router.use(requireAuth)
+router.use(requireAuth); // авторизація обов’язкова для всіх
 
-// GET all activities for current user
-router.get('/', async (req, res) => {
-    const activities = await Activity.find({ user_id: req.user }).sort({ date: -1 })
-    res.status(200).json(activities)
-})
+// 🔓 Дозволено: Root, Admin, User (тільки свої активності)
+router.get('/', requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin, ROLES_LIST.User]), activityController.getAll);
+router.post('/', requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin, ROLES_LIST.User]), activityController.create);
 
-// POST new activity
-router.post('/', async (req, res) => {
-    const newActivity = await Activity.create({ ...req.body, user_id: req.user })
-    res.status(201).json(newActivity)
-})
+// 🔐 Інші дії — лише Root, Admin
+router.get('/:id', requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin]), activityController.getOne);
+router.patch('/:id', requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin]), activityController.update);
+router.delete('/:id', requireRoles([ROLES_LIST.Root]), activityController.delete);
 
-module.exports = router
+module.exports = router;
