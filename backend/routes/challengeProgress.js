@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const controller = require('../controllers/sleep');
+const controller = require('../controllers/challengeProgress');
 const requireAuth = require('../middleware/requireAuth');
 const requireRoles = require('../middleware/requireRoles');
 const ROLES_LIST = require('../config/rolesList');

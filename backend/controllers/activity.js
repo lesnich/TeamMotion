@@ -1,38 +1,20 @@
 const Activity = require('../models/Activity');
+const User = require('../models/user/User');
 const { CustomError } = require('../middleware/errorHandler');
 const { validateObjectId } = require('../utils/validation');
+const ROLES_LIST = require('../config/rolesList');
 
+// 🆕 CREATE
 exports.create = async (req, res, next) => {
     try {
-        const {
-            user_id,
-            date,
-            steps,
-            calories,
-            distance,
-            heartRateAvg,
-            minutesActive,
-            elevationGain,
-            hydration,
-            cyclingDistance,
-            source
-        } = req.body;
+        const { date, ...data } = req.body;
 
-        if (!user_id || !date) throw new CustomError('user_id and date are required', 400);
-        validateObjectId(user_id, 'User');
+        if (!date) throw new CustomError('Date is required', 400);
 
         const activity = await Activity.create({
-            user_id,
-            date,
-            steps,
-            calories,
-            distance,
-            heartRateAvg,
-            minutesActive,
-            elevationGain,
-            hydration,
-            cyclingDistance,
-            source
+            ...data,
+            user_id: req.user._id,
+            date
         });
 
         res.status(201).json(activity);
@@ -41,29 +23,19 @@ exports.create = async (req, res, next) => {
     }
 };
 
+// 📋 GET ALL
 exports.getAll = async (req, res, next) => {
     try {
-        const {
-            startDate,
-            endDate,
-            source,
-            page = 1,
-            limit = 10
-        } = req.query;
-
+        const { startDate, endDate, source, page = 1, limit = 10 } = req.query;
         const filters = {};
 
-        // 🔐 Якщо роль User — фіксуємо user_id
-        if (req.roles.includes(ROLES_LIST.User)) {
-            filters.user_id = req.user._id;
-        } else if (req.query.user_id) {
-            // 🔐 Root/Admin можуть фільтрувати за user_id
-            validateObjectId(req.query.user_id, 'User');
-            filters.user_id = req.query.user_id;
+        if (req.roles.includes(ROLES_LIST.User) || req.roles.includes(ROLES_LIST.Admin)) {
+            if (!req.user.company) throw new CustomError('User has no company', 403);
+            const usersInCompany = await User.find({ company: req.user.company }).select('_id').lean();
+            filters.user_id = { $in: usersInCompany.map((u) => u._id) };
         }
 
         if (source) filters.source = source;
-
         if (startDate || endDate) {
             filters.date = {};
             if (startDate) filters.date.$gte = new Date(startDate);
@@ -77,8 +49,7 @@ exports.getAll = async (req, res, next) => {
             .sort({ date: -1 })
             .skip(skip)
             .limit(parseInt(limit))
-            .lean()
-            .exec();
+            .lean();
 
         res.status(200).json({
             total,
@@ -91,14 +62,33 @@ exports.getAll = async (req, res, next) => {
     }
 };
 
-
+// 📄 GET ONE
 exports.getOne = async (req, res, next) => {
     try {
         const { id } = req.params;
         validateObjectId(id, 'Activity');
 
-        const activity = await Activity.findById(id).lean().exec();
+        const activity = await Activity.findById(id).lean();
         if (!activity) throw new CustomError('Activity not found', 404);
+
+        if (req.roles.includes(ROLES_LIST.Root)) return res.status(200).json(activity);
+
+        const targetUser = await User.findById(activity.user_id).select('company').lean();
+        if (!targetUser) throw new CustomError('User not found', 404);
+
+        if (
+            (req.roles.includes(ROLES_LIST.User) || req.roles.includes(ROLES_LIST.Admin)) &&
+            (!req.user.company || req.user.company.toString() !== targetUser.company?.toString())
+        ) {
+            throw new CustomError('Not authorized to view this activity', 403);
+        }
+
+        if (
+            req.roles.includes(ROLES_LIST.User) &&
+            activity.user_id.toString() !== req.user._id.toString()
+        ) {
+            throw new CustomError('Not authorized to view this activity', 403);
+        }
 
         res.status(200).json(activity);
     } catch (error) {
@@ -106,33 +96,82 @@ exports.getOne = async (req, res, next) => {
     }
 };
 
+// ✏️ UPDATE
 exports.update = async (req, res, next) => {
     try {
         const { id } = req.params;
         validateObjectId(id, 'Activity');
 
-        const updated = await Activity.findByIdAndUpdate(id, req.body, {
-            new: true,
-            runValidators: true
-        }).lean().exec();
+        const activity = await Activity.findById(id);
+        if (!activity) throw new CustomError('Activity not found', 404);
 
-        if (!updated) throw new CustomError('Activity not found', 404);
+        if (req.roles.includes(ROLES_LIST.Root)) {
+            Object.assign(activity, req.body);
+            await activity.save();
+            return res.status(200).json(activity);
+        }
 
-        res.status(200).json(updated);
+        const targetUser = await User.findById(activity.user_id).select('company').lean();
+        if (!targetUser) throw new CustomError('User not found', 404);
+
+        if (
+            req.roles.includes(ROLES_LIST.Admin) &&
+            req.user.company?.toString() === targetUser.company?.toString()
+        ) {
+            Object.assign(activity, req.body);
+            await activity.save();
+            return res.status(200).json(activity);
+        }
+
+        if (
+            req.roles.includes(ROLES_LIST.User) &&
+            activity.user_id.toString() === req.user._id.toString()
+        ) {
+            Object.assign(activity, req.body);
+            await activity.save();
+            return res.status(200).json(activity);
+        }
+
+        throw new CustomError('Not authorized to update this activity', 403);
     } catch (error) {
         next(error);
     }
 };
 
+// ❌ DELETE
 exports.delete = async (req, res, next) => {
     try {
         const { id } = req.params;
         validateObjectId(id, 'Activity');
 
-        const deleted = await Activity.findByIdAndDelete(id).lean().exec();
-        if (!deleted) throw new CustomError('Activity not found', 404);
+        const activity = await Activity.findById(id);
+        if (!activity) throw new CustomError('Activity not found', 404);
 
-        res.status(200).json({ message: 'Activity deleted', id });
+        if (req.roles.includes(ROLES_LIST.Root)) {
+            await Activity.findByIdAndDelete(id);
+            return res.status(200).json({ message: 'Activity deleted', id });
+        }
+
+        const targetUser = await User.findById(activity.user_id).select('company').lean();
+        if (!targetUser) throw new CustomError('User not found', 404);
+
+        if (
+            req.roles.includes(ROLES_LIST.Admin) &&
+            req.user.company?.toString() === targetUser.company?.toString()
+        ) {
+            await Activity.findByIdAndDelete(id);
+            return res.status(200).json({ message: 'Activity deleted', id });
+        }
+
+        if (
+            req.roles.includes(ROLES_LIST.User) &&
+            activity.user_id.toString() === req.user._id.toString()
+        ) {
+            await Activity.findByIdAndDelete(id);
+            return res.status(200).json({ message: 'Activity deleted', id });
+        }
+
+        throw new CustomError('Not authorized to delete this activity', 403);
     } catch (error) {
         next(error);
     }

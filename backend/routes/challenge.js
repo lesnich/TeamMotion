@@ -1,21 +1,40 @@
-const challengeRouter = require('express').Router()
-const Challenge = require('../models/Challenge')
-const requireAuth = require('../middleware/requireAuth')
-const requireRoles = require('../middleware/requireRoles')
-const ROLES_LIST = require('../config/rolesList')
+const router = require('express').Router();
+const challengeController = require('../controllers/challenge');
+const requireAuth = require('../middleware/requireAuth');
+const requireRoles = require('../middleware/requireRoles');
+const ROLES_LIST = require('../config/rolesList');
 
-challengeRouter.use(requireAuth)
+router.use(requireAuth);
 
-// GET all challenges
-challengeRouter.get('/', async (req, res) => {
-    const challenges = await Challenge.find().sort({ startDate: -1 })
-    res.status(200).json(challenges)
-})
+router.get(
+    '/',
+    requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin, ROLES_LIST.User]), // 👈 додали User
+    challengeController.getAll
+);
 
-// POST new challenge (admin only)
-challengeRouter.post('/', requireRoles([ROLES_LIST.Admin, ROLES_LIST.Root]), async (req, res) => {
-    const newChallenge = await Challenge.create({ ...req.body, createdBy: req.user })
-    res.status(201).json(newChallenge)
-})
 
-module.exports = challengeRouter
+router.post(
+    '/',
+    requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin]),
+    challengeController.create
+);
+
+router.get(
+    '/:id',
+    requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin]),
+    challengeController.getOne
+);
+
+router.patch(
+    '/:id',
+    requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin]),
+    challengeController.update
+);
+
+router.delete(
+    '/:id',
+    requireRoles([ROLES_LIST.Root, ROLES_LIST.Admin]),
+    challengeController.delete
+);
+
+module.exports = router;
